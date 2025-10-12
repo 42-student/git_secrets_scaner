@@ -3,6 +3,8 @@ import git
 import tempfile
 import re
 import ollama
+import argparse
+import json
 
 # common regex patterns for secrets
 SECRET_PATTERNS = {
@@ -31,9 +33,6 @@ def get_last_n_commits(repo, n):
 		commits.append(commit_data)
 	return commits
 
-# TESTING git repo handling and commit extraction
-#if __name__ == '__main__': repo = get_repo('https://github.com/42-student/libunit'); commits = get_last_n_commits(repo, 5); print(commits[1])
-
 # quick regex to flag suspects
 def scan_with_heuristics(text):
 	findings = []
@@ -55,7 +54,7 @@ def scan_with_llm(text):
 	Analyze this Git diff or commit message for sensitive data like API keys, passwords, private keys, or other secrets.
 	Consider context: ignore sample code or non-secrets.
 	Output only JSON array: [{{"file": "str", "snippet": "str", "type": "str", "rationale": "str", "confidence": "high|medium|low"}}]
-	Text: {text[:2000]}
+	Text: {text[:1000]}
 	"""
 	response = ollama.generate(model='llama3', prompt=prompt)
 	try:
@@ -92,69 +91,25 @@ def analyze_commit(commit_data):
 
 	return [{'commit_hash': commit_data['hash'], **f} for f in findings]
 
-'''
-#TEST mock a commit_data to test analyze_commit()
+def main():
+	parser = argparse.ArgumentParser(description='Scan Git repo for secrets.')
+	parser.add_argument('--repo', required=True, help='Repo path or URL')
+	parser.add_argument('--n', type=int, default=5, help='Number of commits')
+	parser.add_argument('--out', default='report.json', help='Output JSON file')
+	args = parser.parse_args()
 
-from unittest.mock import patch
+	repo = get_repo(args.repo)
+	commits = get_last_n_commits(repo, args.n)
 
-# Mock git.Diff class
-class MockDiff:
-    def __init__(self, a_path, b_path, diff):
-        self.a_path = a_path
-        self.b_path = b_path
-        self.diff = diff.encode('utf-8') if diff else None
+	all_findings = []
+	for commit in commits:
+		all_findings.extend(analyze_commit(commit))
 
-# Mock ollama.generate function
-def mock_ollama_generate(model, prompt):
-    # Simulate LLM response for testing
-    if 'API_KEY' in prompt:
-        return {'response': '[ {"file": "", "snippet": "API_KEY=abc123xyz45678901234567890", "type": "API_KEY", "rationale": "Long alphanumeric string in API key format", "confidence": "high"} ]'}
-    return {'response': '[]'}
+	with open(args.out, 'w') as f:
+		json.dump({'findings': all_findings}, f, indent=4)
 
-# Mock commit_data
-mock_commit_data = {
-    'hash': 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0',
-    'message': 'Add API key for testing\nAPI_KEY=abc123xyz45678901234567890',
-    'diff': [
-        MockDiff(a_path='config.py', b_path='config.py', diff='@@ -1,1 +1,2 @@\n-OLD_KEY=123\n+API_KEY=abc123xyz45678901234567890\n+AWS_KEY=AKIA1234567890ABCDEF'),
-        MockDiff(a_path='readme.md', b_path='readme.md', diff='@@ -1,1 +1,1 @@\n-Sample text\n+Sample text with no secrets')
-    ]
-}
+	print(f'Raport saved to {args.out}')
 
-# Test the analyze_commit function
 if __name__ == '__main__':
-    with patch('ollama.generate', side_effect=mock_ollama_generate):
-        results = analyze_commit(mock_commit_data)
-        print("Analysis Results:")
-        for result in results:
-            print(result)
-'''
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+	main()
 
